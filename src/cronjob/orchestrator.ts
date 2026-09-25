@@ -36,10 +36,14 @@ export interface RunOutcome {
   readonly runId: RunId;
   readonly cronjobId: string;
   readonly status: RunStatus;
+  /** Why this run happened; carried so a notification can report the truth. */
+  readonly trigger: RunTrigger;
   readonly errorCode?: string;
   readonly summary: string;
   readonly startedAt: string;
   readonly finishedAt: string;
+  /** Absolute path of the run's log, so a reader can fetch it directly. */
+  readonly logPath: string;
 }
 
 export interface OrchestratorOptions {
@@ -114,7 +118,7 @@ export class Orchestrator {
     // ── re-read and re-validate, unconditionally ──────────────────────────
     const text = await this.#storage.readDefinitionText(cronjobId);
     if (text === undefined) {
-      return this.#rejected(cronjobId, runId, startedAt, "definition_missing", "definition file not found");
+      return this.#rejected(cronjobId, runId, startedAt, trigger, "definition_missing", "definition file not found");
     }
     const validation = validateDefinitionText(text, cronjobId, { now: startedAt });
     if (!validation.ok) {
@@ -123,6 +127,7 @@ export class Orchestrator {
         cronjobId,
         runId,
         startedAt,
+        trigger,
         first?.code ?? "schema_invalid",
         first?.message ?? "definition is invalid",
       );
@@ -134,10 +139,12 @@ export class Orchestrator {
         runId,
         cronjobId,
         status: "skipped",
+        trigger,
         errorCode: "job_disabled",
         summary: "job is disabled",
         startedAt: startedAt.toISOString(),
         finishedAt: this.#now().toISOString(),
+        logPath: this.#storage.logPath(cronjobId, startedAt, runId),
       };
     }
 
@@ -147,10 +154,12 @@ export class Orchestrator {
         runId,
         cronjobId,
         status: "skipped",
+        trigger,
         errorCode: "already_running",
         summary: "another run of this job is still in flight",
         startedAt: startedAt.toISOString(),
         finishedAt: this.#now().toISOString(),
+        logPath: this.#storage.logPath(cronjobId, startedAt, runId),
       };
     }
     if (this.#activeGlobally >= this.#maxGlobalConcurrency) {
@@ -158,10 +167,12 @@ export class Orchestrator {
         runId,
         cronjobId,
         status: "skipped",
+        trigger,
         errorCode: "concurrency_limit",
         summary: "global concurrency limit reached",
         startedAt: startedAt.toISOString(),
         finishedAt: this.#now().toISOString(),
+        logPath: this.#storage.logPath(cronjobId, startedAt, runId),
       };
     }
     const lock = await this.#storage.acquireRunLock(cronjobId, runId);
@@ -170,10 +181,12 @@ export class Orchestrator {
         runId,
         cronjobId,
         status: "skipped",
+        trigger,
         errorCode: "lock_held",
         summary: "another process holds this job's lock",
         startedAt: startedAt.toISOString(),
         finishedAt: this.#now().toISOString(),
+        logPath: this.#storage.logPath(cronjobId, startedAt, runId),
       };
     }
 
@@ -359,10 +372,12 @@ export class Orchestrator {
       runId: terminal.runId,
       cronjobId: terminal.cronjobId,
       status,
+      trigger: terminal.trigger,
       ...(errorCode === undefined ? {} : { errorCode }),
       summary,
       startedAt: terminal.startedAt,
       finishedAt: terminal.finishedAt ?? finishedAt.toISOString(),
+      logPath: log.path,
     };
   }
 
@@ -371,22 +386,24 @@ export class Orchestrator {
     cronjobId: string,
     runId: RunId,
     startedAt: Date,
+    trigger: RunTrigger,
     errorCode: string,
     message: string,
   ): Promise<RunOutcome> {
     const finishedAt = this.#now();
+    const logPath = this.#storage.logPath(cronjobId, startedAt, runId);
     const state: RunState = {
       runId,
       cronjobId,
       definitionDigest: "",
-      trigger: "cron",
+      trigger,
       status: "rejected",
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       nodes: {},
       resultSummary: message,
       errorCode,
-      logPath: "",
+      logPath,
       notificationStatus: "pending",
     };
     await this.#storage.createRun(state).catch(() => undefined);
@@ -395,8 +412,10 @@ export class Orchestrator {
       runId,
       cronjobId,
       status: "rejected",
+      trigger,
       errorCode,
       summary: message,
+      logPath,
       startedAt: state.startedAt,
       finishedAt: state.finishedAt ?? finishedAt.toISOString(),
     };

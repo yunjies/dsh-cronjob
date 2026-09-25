@@ -137,3 +137,74 @@ describe("applyEnabled", () => {
     expect(flipped).toContain("cronjobName: Daily report");
   });
 });
+
+describe("run outcomes carry the facts a reader needs", () => {
+  it("reports the real trigger, not a hardcoded one", async () => {
+    const { service } = build();
+    await service.start();
+    await createScripts(service.storage.scriptsDir, ["collect.py"]);
+    await service.upsert("job", definitionYaml({ cronjobId: "job" }));
+
+    const manual = await service.runNow("job");
+    // A manual run must not be recorded as a scheduled one: the trigger
+    // decides whether a scheduled occurrence was consumed.
+    expect(manual.trigger).toBe("manual");
+
+    const [listed] = await service.listRuns("job");
+    expect(listed?.trigger).toBe("manual");
+
+    const scheduled = await service.handleFire({
+      cronjobId: "job",
+      scheduledAt: new Date("2026-03-01T08:00:00Z"),
+      late: false,
+    });
+    void scheduled;
+    const runs = await service.listRuns("job");
+    expect(runs.some((run) => run.trigger === "cron")).toBe(true);
+    await service.dispose();
+  });
+
+  it("returns a log path that actually reads back", async () => {
+    const { service } = build();
+    await service.start();
+    await createScripts(service.storage.scriptsDir, ["collect.py"]);
+    await service.upsert("job", definitionYaml({ cronjobId: "job" }));
+
+    const outcome = await service.runNow("job");
+    expect(outcome.logPath).not.toBe("");
+    // The log tool resolves through the path recorded on the run, so an empty
+    // or stale path would make every run unreadable.
+    const text = await service.readLog("job", outcome.runId);
+    expect(text).toBeTypeOf("string");
+    expect(text).toContain("run.succeeded");
+    await service.dispose();
+  });
+
+  it("records a rejected run's trigger and log path too", async () => {
+    const { service } = build();
+    await service.start();
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(join(service.storage.definitionsDir, "bad.yaml"), definitionYaml({ cronjobId: "bad", scheduleTime: "nope" }), "utf8");
+    await service.reload();
+
+    const outcome = await service.runNow("bad");
+    expect(outcome.status).toBe("rejected");
+    expect(outcome.trigger).toBe("manual");
+    expect(outcome.logPath).not.toBe("");
+    await service.dispose();
+  });
+
+  it("notifies for a skipped run so a never-firing job is visible", async () => {
+    const { service, sent } = build();
+    await service.start();
+    await service.upsert(
+      "job",
+      definitionYaml({ cronjobId: "job", enabled: false, bindSessionId: "session-1" }),
+    );
+    const outcome = await service.runNow("job");
+    expect(outcome.status).toBe("skipped");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("skipped");
+    await service.dispose();
+  });
+});

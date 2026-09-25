@@ -20,5 +20,6 @@ export * from "./cronjob/executors/python.js";
 export * from "./cronjob/executors/subagent.js";
 
 export { apply, inject, name } from "./cronjob/index.js";
+export * as toolCronjob from "./cronjob/tool-cronjob.js";
 export type { CronjobPluginConfig } from "./cronjob/index.js";
 export { default } from "./cronjob/index.js";

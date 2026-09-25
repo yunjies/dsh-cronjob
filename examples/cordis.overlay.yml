@@ -1,0 +1,33 @@
+# Example composition overlay for the cronjob capability.
+#
+# Two rows on two planes. Mount the service row on the HOST composition and the
+# tool row on the agent preset you want to give the cronjob surface to.
+#
+# Why the split is not optional:
+#   - `@deepseek-ai/dsh-cronjob` publishes the process-global `cronjobs`
+#     service. A service row loose in a preset lands in the root realm, so the
+#     second session mounting that preset collides on the service name; the
+#     mount rejects it rather than letting the collision surface later.
+#   - `tool-cronjob` publishes nothing. It consumes `cronjobs` and `tools`, so
+#     it is exactly what a preset contributes.
+
+# ── Host plane ──────────────────────────────────────────────────────────────
+# Mount once per process, beside the other host rows.
+- id: cronjob
+  name: '@deepseek-ai/dsh-cronjob'
+  config:
+    # Optional; defaults to the runtime's own DSH_HOME resolution.
+    # dshHome: /path/to/dsh-home
+    interpreter: python3
+    # Bounded global concurrency across every job.
+    maxGlobalConcurrency: 4
+    # Provider used by a subagent node that names none.
+    # subagentDefaultProvider: codex
+
+# ── Agent plane ─────────────────────────────────────────────────────────────
+# Add to an agent preset to give one agent the nine cronjob_* tools.
+# The subpath entry is the row that consumes `cronjobs` + `tools`; the bare
+# package entry above is the provider. Naming the provider here instead would
+# put a second service copy on the agent plane and fail the mount.
+- id: tool-cronjob
+  name: '@deepseek-ai/dsh-cronjob/tool-cronjob'

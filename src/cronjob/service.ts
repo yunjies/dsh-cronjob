@@ -350,15 +350,17 @@ export class CronjobService {
     // A job with no bound session records its artifacts and produces no
     // notification; there is no one to tell.
     if (bindSessionId === undefined) return;
+    // A skipped or rejected run is still notified: silence would make a job
+    // that never actually runs look healthy.
     await this.notifications
       .enqueue({
         cronjobId: outcome.cronjobId,
         runId: outcome.runId,
         bindSessionId,
         status: outcome.status,
-        trigger: "cron",
+        trigger: outcome.trigger,
         summary: outcome.summary,
-        logPath: "",
+        logPath: outcome.logPath,
       })
       .catch((error) => {
         this.#logger?.error("notification.enqueue_failed", {

@@ -52,6 +52,7 @@ serializable data across a seam — never a Cordis service, Agent or Session ins
 | Service | `src/cronjob/service.ts` | Host `cronjobs` service assembling the modules |
 | Tools | `src/cronjob/tools.ts` | Agent-facing tool definitions |
 | Entry | `src/cronjob/index.ts` | Cordis plugin object publishing the service |
+| Tools row | `src/cronjob/tool-cronjob.ts` | Cordis plugin object registering the nine tools |
 
 ## Cross-cutting invariants
 
@@ -65,15 +66,43 @@ serializable data across a seam — never a Cordis service, Agent or Session ins
   or subprocess cleanup.
 - After delete/disable/stop no timer, subprocess, queue entry or unreleased lock remains.
 
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `cronjob_validate` | Check a definition's YAML without saving it |
+| `cronjob_upsert` | Validate and persist a definition, then reconcile timers |
+| `cronjob_list` | List every job with its schedule, zone, state and next fire |
+| `cronjob_get` | Read one job |
+| `cronjob_enable` | Schedule or unschedule a job, keeping its history |
+| `cronjob_delete` | Delete a definition; run history stays for retention |
+| `cronjob_run_now` | Fire a job outside its schedule |
+| `cronjob_runs` | Recent runs of one job |
+| `cronjob_log` | Read one run's JSON Lines log, bounded |
+
 ## Composition
 
-The plugin is mounted as two rows on different planes:
+The capability is mounted as two rows on different planes — see
+[`examples/cordis.overlay.yml`](examples/cordis.overlay.yml):
 
 - **Host plane** — `@deepseek-ai/dsh-cronjob` publishes the cross-session `cronjobs` service.
   It must not sit in an agent preset: a second session mounting that preset would collide on
   the service name.
-- **Agent preset** — the `cronjob_*` tools are what a preset adds to give one session the
-  cronjob surface.
+- **Agent preset** — `@deepseek-ai/dsh-cronjob/tool-cronjob` publishes nothing and consumes
+  `cronjobs` + `tools`; it is what a preset adds to give one session the cronjob surface.
+
+## Storage layout
+
+```text
+$DSH_HOME/cronjobs/
+  definitions/{cronjobId}.yaml
+  artifacts/scripts/          # the only root a scriptPath may resolve under
+  runs/{cronjobId}/{runId}/state.json
+  runs/{cronjobId}/{runId}/nodes/{nodeId}.json
+  logs/{cronjobId}/{timestamp}-{runId}.log
+  notifications/{bindSessionId}/{notificationId}.json
+  locks/{cronjobId}.lock
+```
 
 ## Development
 
@@ -86,10 +115,14 @@ npm run typecheck  # tsc --noEmit
 
 ## Status
 
-This is a fresh implementation. The task table, scheduler, orchestrator, executors, logging
-and notification outbox are implemented and unit-tested; the tool *registration* against the
-DSH `tools` registry and a live end-to-end mount are **not yet wired**, so `src/cronjob/tools.ts`
-currently defines the handlers and their contracts without registering them.
+The domain, the tool surface and both composition rows are implemented and tested:
+the definition table, scheduler, orchestrator, executors, logging, notification outbox,
+nine registered tools, and mounting both rows onto a real Cordis `Context`.
+
+**Not verified:** no scheduled fire has run end to end inside a live `dsh` process. The mount
+tests compose the rows against the real Cordis runtime with a timer stand-in; the actual
+`@cordisjs/plugin-timer`, a real subagent provider, and delivery into a live Session have not
+been exercised. Treat the first live mount as the remaining verification step.
 
 ## License
 

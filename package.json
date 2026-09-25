@@ -12,6 +12,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./tool-cronjob": {
+      "types": "./dist/cronjob/tool-cronjob.d.ts",
+      "default": "./dist/cronjob/tool-cronjob.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

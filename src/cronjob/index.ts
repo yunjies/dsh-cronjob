@@ -36,18 +36,18 @@ export interface CronjobPluginConfig {
 }
 
 /** Structural view of the pieces of a Cordis context this plugin consumes. */
+/**
+ * Structural view of the pieces of a Cordis context this plugin consumes.
+ *
+ * Every optional collaborator is read through `get(name)` rather than as a
+ * property. Cordis rejects a bare `ctx.<service>` read for a service the plugin
+ * did not declare in `inject` ("cannot get property X without inject"), and
+ * declaring them all would make the plugin wait for capabilities it can work
+ * without. `get` is the injection-free read and returns `undefined` when the
+ * service is absent, which is exactly the optional semantics this row wants.
+ */
 interface HostContext {
-  readonly timer?: SchedulerTimers;
-  readonly agents?: {
-    get(id: string): unknown;
-  };
-  readonly sessions?: {
-    onSessionResumed?(handler: (sessionId: string) => void): () => void;
-  };
-  readonly subagents?: {
-    list(): string[];
-    start(name: string, request: Record<string, unknown>): Promise<unknown>;
-  };
+  get(name: string): unknown;
   /**
    * The logging *service*: `ctx.logger(name)` returns a named logger. Cordis
    * mixes this factory onto the context rather than exposing an object with
@@ -126,7 +126,7 @@ export function apply(ctx: HostContext, config: CronjobPluginConfig = {}): void 
  * silently produce a cronjob service that never fires.
  */
 function resolveTimers(ctx: HostContext): SchedulerTimers {
-  const timer = ctx.timer;
+  const timer = ctx.get("timer") as SchedulerTimers | undefined;
   if (timer !== undefined && typeof timer.timeout === "function") return timer;
   return {
     timeout: (callback: () => void, delay: number) => {
@@ -140,7 +140,7 @@ function resolveTimers(ctx: HostContext): SchedulerTimers {
 
 /** Resolve the agent registry, degrading to "nothing is live" when absent. */
 function resolveAgentRegistry(ctx: HostContext): NotificationAgentRegistry {
-  const agents = ctx.agents;
+  const agents = ctx.get("agents") as { get(id: string): unknown } | undefined;
   return {
     findLive(sessionId: string) {
       if (agents === undefined) return undefined;
@@ -162,7 +162,9 @@ function resolveAgentRegistry(ctx: HostContext): NotificationAgentRegistry {
 
 /** Resolve the session-resume hook so offline outboxes can be drained. */
 function resolveSessionLifecycle(ctx: HostContext): NotificationSessionLifecycle | undefined {
-  const sessions = ctx.sessions;
+  const sessions = ctx.get("sessions") as
+    | { onSessionResumed(handler: (sessionId: string) => void): () => void }
+    | undefined;
   if (sessions?.onSessionResumed === undefined) return undefined;
   return {
     onSessionResumed(handler) {
@@ -173,7 +175,9 @@ function resolveSessionLifecycle(ctx: HostContext): NotificationSessionLifecycle
 
 /** Adapt the registered subagent providers to this package's narrow seam. */
 function resolveSubagentProviders(ctx: HostContext): SubagentProvider[] {
-  const subagents = ctx.subagents;
+  const subagents = ctx.get("subagents") as
+    | { list(): string[]; start(name: string, request: Record<string, unknown>): Promise<unknown> }
+    | undefined;
   if (subagents === undefined) return [];
   return subagents.list().map((providerName) => ({
     name: providerName,
