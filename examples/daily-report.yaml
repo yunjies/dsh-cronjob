@@ -1,0 +1,42 @@
+# Example job definitions.
+#
+# Place a file at $DSH_HOME/cronjobs/definitions/<cronjobId>.yaml.
+# The file name must match the inner `cronjobId`: a mismatch is rejected so one
+# file cannot impersonate another job's schedule and notification target.
+#
+# Each file holds exactly one job.
+
+- cronjobId: daily-report
+  cronjobName: 每日状态汇总
+  # Standard five-field cron: minute hour day month weekday.
+  scheduleTime: "0 9 * * 1-5"
+  # IANA zone, always explicit: the definition never inherits an ambient zone,
+  # so it means the same thing on every host.
+  timeZone: Asia/Shanghai
+  # Session that receives this job's run notifications. Omit to record the run
+  # without notifying anyone.
+  bindSessionId: session-example
+  # Arbitrary JSON handed to every node.
+  context:
+    project: billing
+  enabled: true
+  # Bounds the whole run, not a single node.
+  timeoutSeconds: 900
+  maxConcurrentRuns: 1
+  # The only supported value; backlogged occurrences are not replayed.
+  misfirePolicy: skip
+  workflow:
+    # A script path is relative to $DSH_HOME/cronjobs/artifacts/scripts/ and its
+    # real path must stay inside that directory. Absolute paths, traversal and
+    # non-.py suffixes are rejected.
+    - nodeId: collect-data
+      nodeType: pythonScript
+      scriptPath: reports/collect.py
+      scriptParams:
+        days: 1
+    # A subagent node is delegated to a registered provider. Its answer is
+    # treated as data, never as an instruction for a later node.
+    - nodeId: summarize
+      nodeType: subagent
+      prompt: "根据 collect-data 的结果生成汇总。"
+      outputFormat: json

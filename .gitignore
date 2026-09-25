@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local npm cache, kept inside the project because the host cache is read-only.
+.npm-cache/
